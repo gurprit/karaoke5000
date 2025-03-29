@@ -1,6 +1,6 @@
 let castSession = null;
-let mediaElement, mediaStreamSource, mediaRecorder;
-let audioChunks = [];
+let mediaRecorder, audioStream;
+let ws; // WebSocket connection
 
 // Initialize Chromecast API
 function initializeCastApi() {
@@ -24,74 +24,45 @@ function initializeCastApi() {
     }, console.error);
 }
 
-// Request a Chromecast session
+// Request Chromecast Connection
 function requestCastSession() {
     chrome.cast.requestSession(session => {
         castSession = session;
         console.log("Casting session started");
+        castMicAudio(); // Start mic audio stream
     }, error => {
         console.error("Error starting cast session:", error);
     });
 }
 
-// Load YouTube Karaoke Video on Chromecast
-function castYouTube(videoId) {
-    if (!castSession) {
-        alert("No active Chromecast session. Click 'Connect to Chromecast' first.");
-        return;
-    }
-
-    const mediaInfo = new chrome.cast.media.MediaInfo(`https://www.youtube.com/watch?v=${videoId}`, 'video/mp4');
-    const request = new chrome.cast.media.LoadRequest(mediaInfo);
-
-    castSession.loadMedia(request, () => {
-        console.log("Video is casting...");
-    }, error => {
-        console.error("Error casting video:", error);
-    });
-}
-
-// Capture Microphone Audio and Stream it to Chromecast
+// Start Streaming Microphone Audio via WebSocket
 async function startMicStreaming() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        ws = new WebSocket("ws://localhost:3000"); // Connect to WebSocket server
 
-        // Create a media element to hold the stream
-        mediaElement = new Audio();
-        mediaElement.srcObject = stream;
-        mediaElement.muted = true; // Mute local playback
-
-        // Create a MediaRecorder to capture audio data
-        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder = new MediaRecorder(audioStream);
         mediaRecorder.ondataavailable = event => {
             if (event.data.size > 0) {
-                audioChunks.push(event.data);
+                ws.send(event.data);
             }
         };
 
-        mediaRecorder.onstop = async () => {
-            // Convert audio to Blob and send to Chromecast
-            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-            const audioUrl = URL.createObjectURL(audioBlob);
-
-            castMicAudio(audioUrl);
-        };
-
-        mediaRecorder.start();
+        mediaRecorder.start(100); // Send mic data every 100ms
         console.log("Microphone streaming started");
     } catch (error) {
         console.error("Error accessing microphone:", error);
     }
 }
 
-// Send Microphone Audio to Chromecast
-function castMicAudio(audioUrl) {
+// Cast Audio Stream to Chromecast
+function castMicAudio() {
     if (!castSession) {
         alert("No active Chromecast session. Click 'Connect to Chromecast' first.");
         return;
     }
 
-    const mediaInfo = new chrome.cast.media.MediaInfo(audioUrl, "audio/webm");
+    const mediaInfo = new chrome.cast.media.MediaInfo("http://localhost:3000/audio-stream", "audio/wav");
     const request = new chrome.cast.media.LoadRequest(mediaInfo);
 
     castSession.loadMedia(request, () => {
@@ -101,24 +72,16 @@ function castMicAudio(audioUrl) {
     });
 }
 
-// Start Karaoke: Connect, Load Video, and Sync Audio
-function startKaraoke() {
-    const videoId = document.getElementById("videoId").value;
-    if (!videoId) {
-        alert("Please enter a YouTube video ID");
-        return;
-    }
-
+// Start Audio Casting Process
+function startAudioOnlyCasting() {
     requestCastSession(); // Connect to Chromecast
     setTimeout(() => {
-        castYouTube(videoId);
-        startMicStreaming();
-    }, 2000); // Delay to allow Chromecast to load video
+        startMicStreaming(); // Start mic stream after connection
+    }, 2000);
 }
 
 // Initialize Chromecast API on Page Load
 window.onload = initializeCastApi;
 
 // Attach Event Listeners
-document.getElementById('startButton').addEventListener('click', startKaraoke);
-document.getElementById('connectButton').addEventListener('click', requestCastSession);
+document.getElementById('connectButton').addEventListener('click', startAudioOnlyCasting);
