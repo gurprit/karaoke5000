@@ -1,36 +1,27 @@
-const WebSocket = require("ws");
-const static = require("node-static");
+const express = require("express");
 const http = require("http");
+const WebSocket = require("ws");
 
-const PORT = 3000;
-
-// Serve static files (HTML, JS)
-const fileServer = new static.Server("./public");
-
-const server = http.createServer((req, res) => {
-  req.addListener("end", () => fileServer.serve(req, res)).resume();
-});
-
-// WebSocket Server for Audio Streaming
+const app = express();
+const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+app.use(express.static("public"));
+
 wss.on("connection", (ws) => {
-  console.log("Client connected to WebSocket for audio streaming");
+    console.log("Client connected for WebRTC signaling");
 
-  ws.on("message", (message) => {
-    // Broadcast audio data to all connected clients (Chromecast)
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
+    ws.on("message", (message) => {
+        wss.clients.forEach((client) => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                client.send(message);
+            }
+        });
     });
-  });
 
-  ws.on("close", () => {
-    console.log("Client disconnected");
-  });
+    ws.on("close", () => {
+        console.log("Client disconnected");
+    });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+server.listen(3000, () => console.log("Server running on http://localhost:3000"));
