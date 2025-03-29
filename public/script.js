@@ -1,5 +1,6 @@
 let castSession = null;
-let audioContext, source, destination;
+let mediaElement, mediaStreamSource, mediaRecorder;
+let audioChunks = [];
 
 // Initialize Chromecast API
 function initializeCastApi() {
@@ -23,7 +24,7 @@ function initializeCastApi() {
     }, console.error);
 }
 
-// Request to Start Casting to Chromecast
+// Request a Chromecast session
 function requestCastSession() {
     chrome.cast.requestSession(session => {
         castSession = session;
@@ -50,29 +51,54 @@ function castYouTube(videoId) {
     });
 }
 
-// Capture and Send Microphone Audio
+// Capture Microphone Audio and Stream it to Chromecast
 async function startMicStreaming() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioContext = new AudioContext();
-        source = audioContext.createMediaStreamSource(stream);
-        destination = audioContext.createMediaStreamDestination();
 
-        // Delay to Sync with Chromecast Video
-        const delayNode = audioContext.createDelay();
-        delayNode.delayTime.value = 1.0; // Adjust as needed
-        source.connect(delayNode);
-        delayNode.connect(destination);
+        // Create a media element to hold the stream
+        mediaElement = new Audio();
+        mediaElement.srcObject = stream;
+        mediaElement.muted = true; // Mute local playback
 
-        // Create an Audio Element to Play on the TV
-        const audioElement = new Audio();
-        audioElement.srcObject = destination.stream;
-        audioElement.play();
+        // Create a MediaRecorder to capture audio data
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = event => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
 
+        mediaRecorder.onstop = async () => {
+            // Convert audio to Blob and send to Chromecast
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            castMicAudio(audioUrl);
+        };
+
+        mediaRecorder.start();
         console.log("Microphone streaming started");
     } catch (error) {
         console.error("Error accessing microphone:", error);
     }
+}
+
+// Send Microphone Audio to Chromecast
+function castMicAudio(audioUrl) {
+    if (!castSession) {
+        alert("No active Chromecast session. Click 'Connect to Chromecast' first.");
+        return;
+    }
+
+    const mediaInfo = new chrome.cast.media.MediaInfo(audioUrl, "audio/webm");
+    const request = new chrome.cast.media.LoadRequest(mediaInfo);
+
+    castSession.loadMedia(request, () => {
+        console.log("Microphone audio is casting...");
+    }, error => {
+        console.error("Error casting microphone audio:", error);
+    });
 }
 
 // Start Karaoke: Connect, Load Video, and Sync Audio
